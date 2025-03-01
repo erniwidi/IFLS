@@ -1,0 +1,185 @@
+** Merapikan dan membersihkan data menggunakan Stata
+
+** Menyiapkan Data Individu
+clear all
+set more off 
+global datadir "D:\Perokok\Dataset" 
+
+* Data Anggota Rumah Tangga
+use "D:\Perokok\Dataset\bk_ar1.dta", clear
+
+* Merge dengan data Tempat Tinggal
+merge m:1 hhid14 using "D:\Perokok\Dataset\bk_sc1.dta"
+keep if _merge == 3
+drop _merge
+
+* Merge dengan data Perokok
+merge m:1 pidlink using "D:\Perokok\Dataset\b3b_km.dta"
+keep if _merge == 3
+drop _merge
+
+* Simpan data individu
+save "D:\Perokok\Dataset\Data Individu.dta", replace
+
+
+** Menyiapkan data konsumsi rumah tangga
+clear all
+set more off 
+global datadir "D:\Perokok\Dataset" 
+
+* Data konsumsi rumah tangga
+use "D:\Perokok\Dataset\b1_ks1.dta", clear
+
+* Aggregat pengeluaran makanan/minggu (Rp)
+collapse (sum) ks02 , by(hhid14)
+
+* Simpan data konsumsi rumah tangga
+save "D:\Perokok\Dataset\Data Konsumsi.dta", replace
+
+
+** Merge data individu dengan data konsumsi
+clear all
+set more off 
+global datadir "D:\Perokok\Dataset" 
+
+use "D:\Perokok\Dataset\Data Individu.dta", clear
+merge m:1 hhid14 using "D:\Perokok\Dataset\Data Konsumsi.dta"
+keep if _merge == 3
+drop _merge
+
+* Cleaning Data
+* Variabel yang dibutuhkan
+keep hhid14_9 hhid14 pidlink ar07 ar09 ar15c ar13 ar16 sc01_14_14 sc05 km04 ks02
+
+* DIY Resident
+keep if sc01_14_14 == 34
+
+
+* Hapus duplikat data
+** Ubah data srting jadi numerik
+* Data Individu
+encode pidlink, generate(Individu)
+sum Individu
+	
+* Drop duplikat
+duplicates report Individu
+duplicates list Individu
+duplicates drop Individu, force
+
+
+* Variabel Baru
+* Status Merokok
+gen status_merokok = 0 if km04 == 3
+replace status_merokok = 1 if km04 == 1
+
+label define status_merokok 0 "Tidak Merokok/Berhenti Merokok" 1 "Merokok"
+label value status_merokok status_merokok
+
+* Jenis Kelamin
+gen jenis_kelamin = 0 if ar07 == 3
+replace jenis_kelamin =1 if ar07 == 1
+	
+label define jenis_kelamin 0 "Perempuan" 1 "Laki-laki"
+label value jenis_kelamin jenis_kelamin
+
+* Usia
+gen umur = cond(ar09 >= 15 & ar09 <= 35, 1, ///
+            cond(ar09 >= 36 & ar09 <= 55, 2, ///
+            cond(ar09 >= 56 & ar09 <= 75, 3, ///
+            cond(ar09 >= 76, 4, .))))
+	
+label define umus 1 "15-35" 2 "36-55" 3 "56-75" 4 "diatas 75"
+label value umur umur
+
+* Pendidikan
+gen pendidikan = . // Inisialisasi variabel pendidikan dengan missing value
+
+foreach val of numlist 01 02 11 72 {
+    replace pendidikan = 1 if ar16 == `val'
+}
+
+foreach val of numlist 03 04 12 73 {
+    replace pendidikan = 2 if ar16 == `val'
+}
+
+foreach val of numlist 05 06 15 74 {
+    replace pendidikan = 3 if ar16 == `val'
+}
+
+foreach val of numlist 13 61 62 63 60 {
+    replace pendidikan = 4 if ar16 == `val'
+}
+
+replace pendidikan = 0 if ar16 == 01 // Baris awal, diluar loop, karena akan ditimpa oleh loop pertama
+	
+label define pendidikan 0 "Tidak Sekolah" 1 "SD" 2 "SMP" 3 "SMA/SMK" 4 "Perguruan Tinggi"
+label value pendidikan pendidikan
+
+* Pekerjaan 
+gen pekerjaan = cond(ar15c == 01, 1, 0)
+replace pekerjaan = 0 if inlist(ar15c, 02, 03, 04, 05, 06, 07, 98)
+	
+label define pekerjaan 0 "Tidak Bekerja" 1 "Bekerja"
+label value pekerjaan pekerjaan
+
+* Pernikahan
+gen pernikahan = cond(ar13 == 2, 1, 0)
+replace pernikahan = 0 if inlist(ar13, 1, 3, 4, 5)
+
+label define pernikahan 0 "Belum Menikah/Cerai" 1 "Menikah"
+label value pernikahan pernikahan
+
+* Tempat Tinggal
+gen tempat_tinggal = 0 if sc05 == 2
+replace tempat_tinggal = 1 if sc05 == 1
+	
+label define tempat_tinggal 0 "Pedesaan" 1 "Perkotaan"
+label value tempat_tinggal tempat_tinggal
+
+* Perokok berdasarkan pengeluaran makanan
+* Menghitung pengeluaran makanan
+gen pengeluaran_makanan = ks02*4
+	
+* Menentukan garis kemiskinan
+* Berdasarkan BPS, pada 2014 garis kemiskinan DIY Rp 321056 perkapita/bulan
+gen pengeluaran = 0 if pengeluaran_makanan <= 321056
+replace pengeluaran = 1 if pengeluaran_makanan > 321056
+	
+label define pengeluaran 0 "Dibawah Garis Kemiskinan" 1 "Diatas Garis Kemiskinan"
+label value pengeluaran pengeluaran
+
+* Drop missing value
+foreach var of varlist status_merokok jenis_kelamin umur pendidikan pekerjaan pernikahan tempat_tinggal pengeluaran {
+	drop if missing(`var')
+}
+
+
+* Save bentuk Excel
+export excel using "D:\Perokok\Data Final.xls", firstrow(variables) nolabel replace
+
+
+** Analisis deskriptif
+foreach var of varlist status_merokok jenis_kelamin umur pendidikan pekerjaan pernikahan tempat_tinggal pengeluaran {
+	tab `var'
+}
+
+* Analisis Statistik
+logit status_merokok jenis_kelamin umur pendidikan pekerjaan pernikahan tempat_tinggal pengeluaran
+logistic status_merokok jenis_kelamin umur pendidikan pekerjaan pernikahan tempat_tinggal pengeluaran
+
+* Uji Wald
+foreach x in jenis_kelamin umur pendidikan pekerjaan pernikahan tempat_tinggal pengeluaran _cons {
+    local wald= (_b[`x']/_se[`x'])^2
+    display "Wald statistic for `x' = " %4.3f `wald'
+}
+
+* Uji Hosmer-Lemeshow
+estat gof, group(10)
+
+* Kurva ROC
+lroc
+
+* Matriks klasifikasi
+predict probabilitas
+generate prediksi = (probabilitas >= 0.5)
+table status_merokok prediksi
